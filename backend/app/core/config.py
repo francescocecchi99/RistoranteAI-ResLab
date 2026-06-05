@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     db_pool_timeout_seconds: int = 5
     db_pool_recycle_seconds: int = 1800
 
+    reservation_lab_booking_enabled: bool = Field(default=True, validation_alias="RESERVATION_LAB_BOOKING_ENABLED")
+    default_restaurant_id: str = Field(default="r1", validation_alias="DEFAULT_RESTAURANT_ID")
+    voice_audio_retention_days: int = Field(default=7, validation_alias="VOICE_AUDIO_RETENTION_DAYS")
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def split_origins(cls, value: str | list[str]) -> list[str]:

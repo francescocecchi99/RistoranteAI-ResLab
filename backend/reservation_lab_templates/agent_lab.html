@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Agent — Reservation Lab{% endblock %}
+{% block content %}
+<div class="lab-pick-inner lab-agent-head">
+  <nav class="lab-agent-breadcrumb" aria-label="Page location">
+    <a href="{{ url_for('index') }}" data-i18n="navHome">Home</a>
+    <span class="lab-agent-breadcrumb-sep" aria-hidden="true">·</span>
+    <a href="{{ url_for('add_restaurant_pick') }}" data-i18n="agentNavOwner">Owner setup</a>
+    <span class="lab-agent-breadcrumb-sep" aria-hidden="true">·</span>
+    <span class="lab-agent-breadcrumb__here" aria-current="page" data-i18n="agentNavHere">Agent requests</span>
+  </nav>
+
+  <p class="lab-pick-kicker" data-i18n="appName">Reservation Lab</p>
+  <h1 class="lab-pick-title" data-i18n="agentPageTitle">Voice agent request console</h1>
+  <p class="lab-pick-lead" data-i18n="agentPageLead">
+    Separate tool page: POST the same JSON your voice agent would send—check availability, then confirm the pending reservation.
+  </p>
+</div>
+
+<div class="lab-marketing-wide lab-agent-wide">
+  {% if setup_message %}
+  <div class="lab-card lab-muted">{{ setup_message }}</div>
+  {% endif %}
+
+  <div class="lab-card">
+    <h2 data-i18n="homeCardAgent">Test agent request</h2>
+    <p class="lab-muted" data-i18n="homeCardAgentHint">POST JSON as the voice agent would send it.</p>
+    <form method="post" action="{{ url_for('check') }}">
+      <textarea class="lab-input" name="payload">{{ payload }}</textarea>
+      <div class="lab-actions">
+        <button type="submit" class="lab-btn lab-btn-secondary" data-i18n="btnCheck">Check availability</button>
+      </div>
+    </form>
+
+    {% if result and result.available and result.reservation_status == 'pending' %}
+    <div class="lab-card lab-followup-card">
+      <h3 data-i18n="createStepTitle">Confirm reservation (step 2)</h3>
+      <p class="lab-muted" data-i18n="createStepLead">Pending reservation created. Send final JSON (with customer_name) to confirm it.</p>
+      <form method="post" action="{{ url_for('create') }}">
+        <input type="hidden" name="pending_reservation_id" value="{{ pending_reservation_id }}" />
+        <textarea class="lab-input" name="payload">{{ payload_step2 }}</textarea>
+        <div class="lab-actions">
+          <button type="submit" class="lab-btn lab-btn-primary" data-i18n="btnConfirm">Confirm reservation</button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if result %}
+  <div class="lab-card" style="margin-top:1.5rem">
+    <h2>Output</h2>
+    <h3 class="lab-muted" style="font-size:0.85rem;margin:0.5rem 0">Agent response</h3>
+    <pre class="lab-pre">{{ result.agent_response }}</pre>
+    {% if result.db_preview %}
+    <h3 class="lab-muted" style="font-size:0.85rem;margin:0.5rem 0">DB preview</h3>
+    <pre class="lab-pre">{{ result.db_preview }}</pre>
+    {% endif %}
+    {% if result.db_saved %}
+    <h3 class="lab-muted" style="font-size:0.85rem;margin:0.5rem 0">DB saved</h3>
+    <pre class="lab-pre">{{ result.db_saved }}</pre>
+    {% endif %}
+    {% if result.reason %}
+    <h3 class="lab-muted" style="font-size:0.85rem;margin:0.5rem 0">Reason</h3>
+    <pre class="lab-pre">{{ result.reason }}</pre>
+    {% endif %}
+    {% if result.debug %}
+    <h3 class="lab-muted" style="font-size:0.85rem;margin:0.5rem 0">Debug</h3>
+    <pre class="lab-pre">{{ result.debug }}</pre>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

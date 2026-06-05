@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" class="h-full antialiased">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>{% block title %}Reservation Lab{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/lab.css') }}" />
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="lab-body h-full {% set frame = page_frame|default('marketing') %}{% if frame == 'marketing' %}lab-page-marketing{% elif frame == 'pick' %}lab-page-pick{% elif frame == 'setup' %}lab-page-setup{% else %}lab-page-marketing{% endif %}">
+  {% set frame = page_frame|default('marketing') %}
+  {% if frame == 'marketing' %}
+  <div class="lab-marketing">
+  {% elif frame == 'pick' %}
+  <div class="lab-pick-page">
+    <header class="lab-pick-topbar">
+      <a href="{{ url_for('index') }}" class="lab-pick-toplink" data-i18n="navHome">Home</a>
+      <div class="lab-pick-lang">
+        <button type="button" class="lab-mLangBtn is-active" data-lang="en" aria-pressed="true">English</button>
+        <button type="button" class="lab-mLangBtn" data-lang="it" aria-pressed="false">Italiano</button>
+      </div>
+    </header>
+    <main class="lab-pick-main">
+  {% elif frame == 'setup' %}
+  <div class="lab-setup-layout">
+    <aside class="lab-section-sidebar" aria-label="Page sections">
+      <div class="lab-section-brand">
+        <p class="lab-section-brand-kicker" data-i18n="kicker">Hospitality OS</p>
+        <h2 class="lab-section-brand-title" data-i18n="appName">Reservation Lab</h2>
+        <p class="lab-section-brand-sub" data-i18n="tableAllocationSubtitle">Table allocation</p>
+      </div>
+      <p class="lab-section-group-label" data-i18n="setupTitle">Initial settings</p>
+      <nav class="lab-section-nav">
+        <a href="#section-identity" class="lab-section-nav__link" data-section-nav="section-identity" data-i18n="navSectionIdentity">Restaurant identity</a>
+        <a href="#section-areas" class="lab-section-nav__link" data-section-nav="section-areas" data-i18n="navSectionAreas">Areas</a>
+        <a href="#section-rules" class="lab-section-nav__link" data-section-nav="section-rules" data-i18n="navSectionRules">Restaurant rules</a>
+        <a href="#section-tables" class="lab-section-nav__link" data-section-nav="section-tables" data-i18n="navSectionTables">Tables</a>
+        <a href="#section-2d-map" class="lab-section-nav__link" data-section-nav="section-2d-map" data-i18n="navSection2dMap">2D map</a>
+      </nav>
+      <div class="lab-section-sidebar-footer">
+        <p class="lab-section-sidebar-label" data-i18n="language">Language</p>
+        <div class="lab-pick-lang">
+          <button type="button" class="lab-mLangBtn is-active" data-lang="en" aria-pressed="true">English</button>
+          <button type="button" class="lab-mLangBtn" data-lang="it" aria-pressed="false">Italiano</button>
+        </div>
+        <a href="{{ url_for('add_restaurant_pick') }}" class="lab-section-backlink" data-i18n="setupBack">← Back to list</a>
+      </div>
+    </aside>
+    <div class="lab-setup-main-scroll">
+  {% endif %}
+        {% block content %}{% endblock %}
+  {% if frame == 'marketing' %}
+  </div>
+  {% elif frame == 'pick' %}
+    </main>
+  </div>
+  {% elif frame == 'setup' %}
+    </div>
+  </div>
+  {% endif %}
+  <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

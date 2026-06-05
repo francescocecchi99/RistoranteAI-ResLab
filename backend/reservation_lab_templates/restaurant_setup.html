@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Initial settings — Reservation Lab{% endblock %}
+{% block head_extra %}
+<script>
+  window.__INITIAL_BUNDLE__ = {{ bundle_json | tojson }};
+  window.__LOAD_ERROR__ = {{ (load_error or "") | tojson }};
+</script>
+{% endblock %}
+{% block content %}
+<header class="lab-setup-pagehead">
+  <p class="lab-setup-pagehead-kicker" data-i18n="appName">Reservation Lab</p>
+  <h1 class="lab-setup-pagehead-title"><span data-i18n="setupTitle">Initial settings</span></h1>
+  <p class="lab-setup-pagehead-desc" data-i18n="setupLead">Define areas…</p>
+</header>
+{% if load_error %}
+<div class="lab-card lab-muted" style="border-color:#fecaca;margin-bottom:1rem">{{ load_error }}</div>
+{% endif %}
+<div id="setup-root" class="lab-setup-content"></div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/restaurant-setup.js') }}"></script>
+{% endblock %}

@@ -13,7 +13,9 @@ from app.core.config import settings
 from app.core.database import SessionLocal, init_db
 from app.core.observability import client_ip_for_request, configure_logging, get_request_id, logging_middleware
 from app.core.rate_limit import InMemoryRateLimiter
+from app.reservation_lab.web import app as reservation_lab_web_app
 from app.services.seed import seed_demo_data
+from starlette.middleware.wsgi import WSGIMiddleware
 
 configure_logging(settings.log_level)
 if settings.sentry_dsn:
@@ -26,7 +28,7 @@ if settings.sentry_dsn:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.auto_create_schema:
+    if settings.auto_create_schema and not settings.reservation_lab_booking_enabled:
         init_db()
         if settings.seed_demo:
             db = SessionLocal()
@@ -120,9 +122,19 @@ def healthz() -> dict[str, str]:
 
 @app.get("/readyz")
 def readyz() -> dict[str, str]:
+    if settings.reservation_lab_booking_enabled:
+        from app.reservation_lab.db import get_connection
+
+        with get_connection() as conn:
+            conn.execute("SELECT 1")
+        return {"status": "ok"}
     db = SessionLocal()
     try:
         db.execute(text("SELECT 1"))
     finally:
         db.close()
     return {"status": "ok"}
+
+
+# Reservation Lab owner UI (Flask) — mounted after API routes
+app.mount("/", WSGIMiddleware(reservation_lab_web_app))

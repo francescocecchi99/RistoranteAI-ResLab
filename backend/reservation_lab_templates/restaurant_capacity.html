@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% block title %}Capacity — Reservation Lab{% endblock %}
+{% block content %}
+<div class="lab-pick-inner lab-capacity-page">
+  <p class="lab-pick-kicker" data-i18n="appName">Reservation Lab</p>
+  <h1 class="lab-pick-title" data-i18n="capacityTitle">Capacity</h1>
+  {% if capacity and capacity.restaurant %}
+  <p class="lab-muted" style="margin-top:0.35rem">{{ capacity.restaurant.restaurant_name }} <span class="lab-muted">({{ restaurant_id }})</span></p>
+  {% endif %}
+  <p class="lab-muted" style="margin-top:0.5rem">
+    <a class="lab-capacity-back" href="{{ url_for('add_restaurant_pick') }}" data-i18n="capacityBackToList">← Back to restaurant list</a>
+  </p>
+
+  {% if db_error %}
+  <div class="lab-card lab-muted" style="border-color:#fecaca;margin-top:1rem">{{ db_error }}</div>
+  {% elif not capacity %}
+  <p class="lab-muted" style="margin-top:1rem" data-i18n="capacityLoadError">Could not load capacity.</p>
+  {% elif capacity.get('closed') %}
+  <p class="lab-muted" style="margin-top:1rem">{{ capacity.get("reason") or "Closed" }}</p>
+  {% elif capacity.get('no_turns') %}
+  <p class="lab-muted" style="margin-top:1rem" data-i18n="capacityNoTurns">No service turns configured for this weekday.</p>
+  {% else %}
+  <p class="lab-pick-lead" data-i18n="capacityLead">
+    Choose date and turn to see real occupancy from the database: confirmed reservations, assigned tables, and head seats for the service.
+  </p>
+
+  <form class="lab-capacity-filters" method="get" action="{{ url_for('restaurant_capacity', restaurant_id=restaurant_id) }}">
+    <div class="lab-field">
+      <label for="cap-service-date" data-i18n="capacityDate">Date</label>
+      <input id="cap-service-date" type="date" name="service_date" value="{{ capacity.service_date.isoformat() }}" />
+    </div>
+    <div class="lab-field">
+      <label for="cap-turn" data-i18n="capacityTurn">Turn</label>
+      <select id="cap-turn" name="turn_key">
+        {% for c in capacity.turn_choices %}
+        <option value="{{ c.key }}" {% if c.meal_period == capacity.meal_period and c.turn_index == capacity.turn_index %}selected{% endif %}>{{ c.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="lab-actions" style="margin-top:0">
+      <button type="submit" class="lab-btn lab-btn-secondary" data-i18n="capacityApply">Apply</button>
+    </div>
+  </form>
+
+  <div class="lab-capacity-stats">
+    <div class="lab-capacity-stat">
+      <span class="lab-capacity-stat-label" data-i18n="capacityOccupied">Seats occupied</span>
+      <span class="lab-capacity-stat-value">{{ capacity.occupied_seats }}</span>
+    </div>
+    <div class="lab-capacity-stat">
+      <span class="lab-capacity-stat-label" data-i18n="capacityFree">Seats free (base)</span>
+      <span class="lab-capacity-stat-value">{{ capacity.free_base }}</span>
+    </div>
+    <div class="lab-capacity-stat lab-capacity-stat--muted">
+      <span class="lab-capacity-stat-label" data-i18n="capacityBaseTotal">Max base seats (all tables)</span>
+      <span class="lab-capacity-stat-value">{{ capacity.total_base }}</span>
+    </div>
+  </div>
+  {% if capacity.pending_count and capacity.pending_count > 0 %}
+  <p class="lab-muted lab-capacity-pending-note">
+    <span data-i18n="capacityPendingNote">Pending reservations (not counted in the confirmed table below):</span>
+    <strong>{{ capacity.pending_count }}</strong>
+  </p>
+  {% endif %}
+
+  <div class="lab-card" style="margin-top:1.25rem">
+    <h2 data-i18n="capacityConfirmedTitle">Confirmed reservations</h2>
+    {% if capacity.reservations_confirmed and capacity.reservations_confirmed|length > 0 %}
+    <div class="lab-capacity-table-wrap">
+      <table class="lab-capacity-table" id="confirmed-reservations-table">
+        <thead>
+          <tr>
+            <th data-i18n="capacityColGuest">Guest</th>
+            <th data-i18n="capacityColPhone">Phone</th>
+            <th data-i18n="capacityColTime">Time</th>
+            <th data-i18n="capacityColParty">Covers</th>
+            <th data-i18n="capacityColTables">Tables</th>
+            <th data-i18n="capacityColHighchairs">High chairs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in capacity.reservations_confirmed %}
+          <tr>
+            <td>{{ r.customer_name }}</td>
+            <td>{{ r.phone_number or "—" }}</td>
+            <td>{{ r.requested_time }}</td>
+            <td>{{ r.party_size }}</td>
+            <td>{{ (r.assigned_tables or [])|join(", ") }}</td>
+            <td>{{ r.high_chairs_requested or 0 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="lab-muted" data-i18n="capacityEmptyConfirmed">No confirmed reservations for this turn.</p>
+    {% endif %}
+    <div class="lab-actions" style="margin-top:0.75rem">
+      <button type="button" class="lab-btn lab-btn-secondary" id="btn-copy-confirmed-text" data-i18n="capacityCopyAsText">Copy as text</button>
+      <button type="button" class="lab-btn lab-btn-secondary" id="btn-copy-confirmed-image" data-i18n="capacityCopyAsImage">Copy as image</button>
+    </div>
+  </div>
+
+  <section class="lab-map-section lab-capacity-map" aria-labelledby="cap-map-title">
+    <h2 id="cap-map-title" class="lab-map-section-title" data-i18n="capacityMapTitle">Occupancy</h2>
+    <p class="lab-map-section-desc" data-i18n="capacityMapDesc">
+      Areas follow settings order. Tiles wrap (min ~9rem). Confirmed and pending reservations for this turn are shown on tables; pending uses a dashed outline.
+    </p>
+    <div class="lab-map-static-head">
+      <h3 class="lab-map-static-title">{{ capacity.restaurant.restaurant_name }} · {{ capacity.service_date.isoformat() }} · {{ capacity.meal_period }}</h3>
+      <p class="lab-map-zone-hint" data-i18n="mapZoneHint"></p>
+    </div>
+    <div class="lab-map-scroll">
+      {% for z in capacity.zones %}
+      {% set tint = loop.cycle('rgba(245 236 228 / 0.75)', 'rgba(235 224 214 / 0.7)', 'rgba(228 218 206 / 0.65)', 'rgba(240 228 218 / 0.7)') %}
+      <div class="lab-map-strip" style="background: {{ tint }}">
+        <div class="lab-map-strip-label">
+          {% if z.area_name == '__other__' %}<span data-i18n="capacityZoneOther">Not in list</span>{% else %}{{ z.area_name }}{% endif %}
+        </div>
+        <div class="lab-map-grid">
+          {% for it in z.zone_items %}
+          {% if it.kind == 'single' %}
+          {% set t = it.table %}
+          {% set res = it.res %}
+          {% set head = (res.head_seats_used or 0) if res else 0 %}
+          {% set head_badge = ('+' ~ (head | string)) if (head | int) > 0 else '' %}
+          <div class="lab-map-tile lab-capacity-tile{% if res %} lab-capacity-tile--busy{% endif %}{% if res and res.status == 'pending' %} lab-capacity-tile--pending{% endif %}">
+            <div class="lab-map-tile-head">
+              <span class="lab-map-tile-name" title="{{ t.table_name }}">{{ t.table_name }}</span>
+              <span class="lab-map-tile-meta">
+                {% if res %}{{ res.customer_name or "—" }} · {{ res.party_size }}{{ head_badge }}{% else %}—{% endif %}
+              </span>
+            </div>
+            <div class="lab-muted" style="font-size:10px;margin-top:0.25rem">{{ z.area_name if z.area_name != '__other__' else '' }} · {{ t.base_capacity }}{{ head_badge }}</div>
+            {% if it.diagram_html %}<div class="lab-capacity-diagram-wrap">{{ it.diagram_html | safe }}</div>{% endif %}
+          </div>
+          {% else %}
+          {% set res = it.res %}
+          {% set mspan = it.tables|length %}
+          {% set span = 4 if mspan > 4 else mspan %}
+          {% set head = (res.head_seats_used or 0) if res else 0 %}
+          {% set head_badge = ('+' ~ (res.head_seats_used | string)) if res and (res.head_seats_used or 0) > 0 else '' %}
+          <div class="lab-map-tile lab-capacity-tile lab-capacity-tile--merge{% if res %} lab-capacity-tile--busy{% endif %}{% if res and res.status == 'pending' %} lab-capacity-tile--pending{% endif %}" style="grid-column: span {{ span }}">
+            <div class="lab-map-tile-head">
+              <span class="lab-map-tile-name">{{ it.tables | map(attribute='table_name') | join(' + ') }}</span>
+              <span class="lab-map-tile-meta">{% if res %}{{ res.customer_name or "—" }} · {{ res.party_size }}{{ head_badge }}{% else %}—{% endif %}</span>
+            </div>
+            <div class="lab-capacity-merge-ids">{{ it.tables | map(attribute='table_id') | join(", ") }}</div>
+            {% if it.diagram_html %}<div class="lab-capacity-diagram-wrap">{{ it.diagram_html | safe }}</div>{% endif %}
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  (function () {
+    const btn = document.getElementById("btn-copy-confirmed-text");
+    const imgBtn = document.getElementById("btn-copy-confirmed-image");
+    if (!btn && !imgBtn) return;
+
+    function getRows() {
+      const rows = document.querySelectorAll("#confirmed-reservations-table tbody tr");
+      const dataRows = [];
+      rows.forEach((tr) => {
+        const cols = [...tr.querySelectorAll("td")].map((td) => (td.textContent || "").trim());
+        if (cols.length) dataRows.push(cols);
+      });
+      return dataRows;
+    }
+
+    if (btn) btn.addEventListener("click", async () => {
+      const dataRows = getRows();
+      const lines = [];
+      lines.push("Confirmed reservations");
+      if (!dataRows.length) {
+        lines.push("* No confirmed reservations");
+      } else {
+        dataRows.forEach((r) => {
+          const guest = r[0] || "—";
+          const phone = r[1] || "—";
+          const time = r[2] || "—";
+          const covers = r[3] || "—";
+          const tables = r[4] || "—";
+          const highChairs = r[5] || "0";
+          lines.push("* guest: " + guest);
+          lines.push("    * Phone: " + phone);
+          lines.push("    * Time: " + time);
+          lines.push("    * Covers: " + covers);
+          lines.push("    * Tables: " + tables);
+          lines.push("    * High chairs: " + highChairs);
+        });
+      }
+      const text = lines.join("\n");
+
+      try {
+        await navigator.clipboard.writeText(text);
+        alert(window.labI18n ? window.labI18n.t("capacityCopied") : "Copied to clipboard.");
+      } catch (_) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "readonly");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+        alert(window.labI18n ? window.labI18n.t("capacityCopied") : "Copied to clipboard.");
+      }
+    });
+
+    if (imgBtn) imgBtn.addEventListener("click", async () => {
+      const dataRows = getRows();
+      const headers = ["Guest", "Phone", "Time", "Covers", "Tables", "High chairs"];
+      const allRows = [headers, ...dataRows];
+
+      const pad = 16;
+      const rowH = 36;
+      const titleH = 44;
+      const font = "14px Arial, sans-serif";
+      const headerFont = "bold 14px Arial, sans-serif";
+      const titleFont = "bold 18px Arial, sans-serif";
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      ctx.font = font;
+      const minCol = [120, 140, 100, 80, 100, 100];
+      const colW = headers.map((h, i) => {
+        let w = Math.max(minCol[i], ctx.measureText(h).width + 24);
+        allRows.forEach((r) => {
+          const txt = String((r[i] ?? "—"));
+          w = Math.max(w, ctx.measureText(txt).width + 24);
+        });
+        return Math.ceil(w);
+      });
+
+      const tableW = colW.reduce((a, b) => a + b, 0);
+      const rowsCount = Math.max(1, dataRows.length) + 1;
+      canvas.width = pad * 2 + tableW;
+      canvas.height = pad * 2 + titleH + rowH * rowsCount;
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#111827";
+      ctx.font = titleFont;
+      ctx.fillText("Confirmed reservations", pad, pad + 28);
+
+      let y = pad + titleH;
+      let x = pad;
+      ctx.font = headerFont;
+      headers.forEach((h, i) => {
+        ctx.fillStyle = "#f3f4f6";
+        ctx.fillRect(x, y, colW[i], rowH);
+        ctx.strokeStyle = "#d1d5db";
+        ctx.strokeRect(x, y, colW[i], rowH);
+        ctx.fillStyle = "#111827";
+        ctx.fillText(h, x + 10, y + 23);
+        x += colW[i];
+      });
+      y += rowH;
+
+      ctx.font = font;
+      const bodyRows = dataRows.length ? dataRows : [["No confirmed reservations", "", "", "", "", ""]];
+      bodyRows.forEach((r, ri) => {
+        x = pad;
+        for (let i = 0; i < headers.length; i++) {
+          ctx.fillStyle = ri % 2 === 0 ? "#ffffff" : "#fafafa";
+          ctx.fillRect(x, y, colW[i], rowH);
+          ctx.strokeStyle = "#e5e7eb";
+          ctx.strokeRect(x, y, colW[i], rowH);
+          ctx.fillStyle = "#111827";
+          const txt = String((r[i] ?? "—"));
+          ctx.fillText(txt, x + 10, y + 23);
+          x += colW[i];
+        }
+        y += rowH;
+      });
+
+      try {
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        if (!blob) throw new Error("Image generation failed");
+        if (!navigator.clipboard || !window.ClipboardItem) throw new Error("Clipboard image API unavailable");
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        alert(window.labI18n ? window.labI18n.t("capacityImageCopied") : "Image copied to clipboard.");
+      } catch (e) {
+        alert((window.labI18n ? window.labI18n.t("toastError") : "Error") + " " + (e.message || e));
+      }
+    });
+  })();
+</script>
+{% endblock %}

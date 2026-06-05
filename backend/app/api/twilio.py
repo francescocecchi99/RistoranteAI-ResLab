@@ -178,6 +178,54 @@ async def inbound_call(request: Request, db: Session = Depends(get_db)) -> Respo
     to_number = str(form.get("To") or form.get("Called") or "").strip()
     call_sid = str(form.get("CallSid") or "").strip() or "missing-call-sid"
 
+    if settings.reservation_lab_booking_enabled:
+        from app.services.reservation_lab_voice import (
+            default_restaurant_id,
+            get_restaurant_for_voice,
+            log_voice_call,
+        )
+
+        restaurant_id = default_restaurant_id()
+        voice_rest = get_restaurant_for_voice(restaurant_id)
+        log_voice_call(
+            restaurant_id=restaurant_id,
+            twilio_call_sid=call_sid,
+            caller_phone=from_number,
+        )
+
+        class _TokenRestaurant:
+            def __init__(self, rid: str) -> None:
+                self.id = rid
+
+        token = _stream_token(
+            restaurant=_TokenRestaurant(restaurant_id),
+            from_number=from_number,
+            to_number=to_number,
+            call_sid=call_sid,
+        )
+        stream_url = escape(_stream_url(request))
+        status_url = escape(_public_http_url(request, f"{settings.api_prefix}/twilio/status"))
+        twiml = (
+            f"<Connect><Stream url=\"{stream_url}\" statusCallback=\"{status_url}\">"
+            f"<Parameter name=\"token\" value=\"{escape(token)}\" />"
+            f"</Stream></Connect>"
+        )
+        json_log(
+            "app.twilio",
+            {
+                "event": "twilio_inbound_stream_created",
+                "request_id": getattr(request.state, "request_id", None),
+                "restaurant_id": restaurant_id,
+                "call_sid": call_sid,
+                "voice_provider": voice_rest.voice_provider,
+                "stream_url": stream_url,
+            },
+        )
+        return Response(
+            content=f'<?xml version="1.0" encoding="UTF-8"?><Response>{twiml}</Response>',
+            media_type="application/xml",
+        )
+
     restaurant = _restaurant_by_twilio_phone(db, to_number)
     if not restaurant:
         json_log(

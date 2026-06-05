@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Add restaurant details — Reservation Lab{% endblock %}
+{% block content %}
+<div class="lab-pick-inner">
+  <p class="lab-pick-kicker" data-i18n="appName">Reservation Lab</p>
+  <h1 class="lab-pick-title" data-i18n="pickTitle">Add restaurant details</h1>
+  <p class="lab-pick-lead" data-i18n="pickLead">Pick a restaurant…</p>
+
+  <div class="lab-actions" style="margin-top:1.25rem;margin-bottom:1.25rem">
+    <a class="lab-btn lab-btn-primary" href="{{ url_for('add_restaurant_setup', new=1) }}" data-i18n="pickNew">New restaurant</a>
+  </div>
+
+  {% if request.args.get('nf') %}
+  <p class="lab-muted" style="color:var(--lab-terracotta);margin-bottom:0.75rem">Restaurant not found.</p>
+  {% endif %}
+  {% if request.args.get('err') %}
+  <p class="lab-muted" style="color:var(--lab-terracotta);margin-bottom:0.75rem">{{ request.args.get('err') }}</p>
+  {% endif %}
+
+  {% if db_error %}
+  <div class="lab-card lab-muted" style="border-color:#fecaca">{{ db_error }}</div>
+  {% elif restaurants %}
+  <ul class="lab-pick-list">
+    {% for r in restaurants %}
+    <li>
+      <details class="lab-pick-details">
+        <summary class="lab-pick-summary">{{ r.restaurant_name }} <span class="lab-muted">({{ r.restaurant_id }})</span></summary>
+        <div class="lab-pick-subactions">
+          <a class="lab-pick-sublink" href="{{ url_for('add_restaurant_setup', restaurant_id=r.restaurant_id) }}" data-i18n="pickLinkSettings">Initial settings</a>
+          <a class="lab-pick-sublink" href="{{ url_for('restaurant_capacity', restaurant_id=r.restaurant_id) }}" data-i18n="pickLinkCapacity">Capacity</a>
+        </div>
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="lab-muted" data-i18n="pickEmpty">No restaurants…</p>
+  <div class="lab-actions" style="margin-top:1rem">
+    <a class="lab-btn lab-btn-primary" href="{{ url_for('add_restaurant_setup', new=1) }}" data-i18n="pickNew">New restaurant</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

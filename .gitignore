@@ -1,4 +1,6 @@
 .DS_Store
+desktop.ini
+**/desktop.ini
 .env
 data/
 .playwright-cli/

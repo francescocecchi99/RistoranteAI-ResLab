@@ -454,6 +454,8 @@ class RealtimeCallState:
     escalation_reason: str | None = None
     booking_context: dict[str, Any] = field(default_factory=dict)
     current_booking_id: str | None = None
+    pending_reservation_id: str | None = None
+    pending_confirm_payload: dict[str, Any] | None = None
 
 
 def default_session_overrides() -> RealtimeSessionOverrides:
@@ -2307,6 +2309,17 @@ def _sync_dispatch_tool(
     db: Session = db_factory()
     try:
         try:
+            if settings.reservation_lab_booking_enabled:
+                from app.services.reservation_lab_voice import dispatch_reservation_lab_tool
+
+                return dispatch_reservation_lab_tool(
+                    restaurant=restaurant,
+                    state=state,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    sync_transfer=_sync_transfer_call_to_restaurant,
+                )
+
             if tool_name == "wait_for_user":
                 return {
                     "success": True,
@@ -2886,7 +2899,14 @@ async def bridge_twilio_media_stream(
 
     db: Session = db_factory()
     try:
-        restaurant = db.get(Restaurant, claims.get("restaurant_id"))
+        if settings.reservation_lab_booking_enabled:
+            from app.services.reservation_lab_voice import default_restaurant_id, get_restaurant_for_voice
+
+            restaurant = get_restaurant_for_voice(
+                str(claims.get("restaurant_id") or default_restaurant_id())
+            )
+        else:
+            restaurant = db.get(Restaurant, claims.get("restaurant_id"))
     finally:
         db.close()
     if not restaurant:
@@ -3280,6 +3300,34 @@ async def bridge_twilio_media_stream(
                             state.silent_response_retries += 1
                             await _send_response_create(realtime_ws, output_modalities=("audio",))
                             continue
+                        if settings.reservation_lab_booking_enabled and state.pending_reservation_id:
+                            from app.reservation_lab.models import BookingRequest, Preferences
+                            from app.services.reservation_lab_voice import confirm_booking_for_voice, default_restaurant_id
+
+                            payload = state.pending_confirm_payload or {}
+                            request = BookingRequest(
+                                restaurant_id=str(getattr(restaurant, "id", None) or default_restaurant_id()),
+                                date=date.fromisoformat(str(payload.get("date"))),
+                                time=time.fromisoformat(str(payload.get("time"))),
+                                customer_name=str(payload.get("customer_name") or ""),
+                                phone_number=state.caller_phone,
+                                party_size=int(payload.get("party_size") or 1),
+                                preferences=Preferences(
+                                    preferred_area=payload.get("preferred_area"),
+                                    special_requests=payload.get("special_requests"),
+                                ),
+                                original_agent_text="voice confirm after assistant speech",
+                            )
+                            confirm_result = confirm_booking_for_voice(
+                                reservation_id=state.pending_reservation_id,
+                                request=request,
+                            )
+                            if confirm_result.get("success"):
+                                state.terminal_write_success = True
+                                state.outcome = "booking_created"
+                                state.current_booking_id = state.pending_reservation_id
+                            state.pending_reservation_id = None
+                            state.pending_confirm_payload = None
                         await _maybe_refresh_summary(
                             realtime_ws=realtime_ws,
                             db_factory=db_factory,
