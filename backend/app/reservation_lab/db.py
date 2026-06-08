@@ -106,6 +106,9 @@ def get_database_url() -> str:
             f"File atteso: {_ENV_PATH} (esiste: {_ENV_PATH.is_file()})"
         )
     _validate_database_url(database_url)
+    if "supabase" in database_url.lower() and "sslmode=" not in database_url.lower():
+        sep = "&" if "?" in database_url else "?"
+        database_url = f"{database_url}{sep}sslmode=require"
     return database_url
 
 
