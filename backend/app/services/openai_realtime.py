@@ -438,6 +438,7 @@ class RealtimeCallState:
     response_audio_started: bool = False
     silent_response_retries: int = 0
     dropped_input_audio_packets: int = 0
+    recorded_caller_audio_ulaw: bytearray = field(default_factory=bytearray)
     initial_greeting_in_progress: bool = True
     initial_greeting_grace_until: datetime | None = None
     caller_speech_detected: bool = False
@@ -1650,6 +1651,7 @@ def _buffer_twilio_media_payload(
     if not decoded:
         return buffered_packets
     buffered_audio.extend(decoded)
+    state.recorded_caller_audio_ulaw.extend(decoded)
     return buffered_packets + 1
 
 
@@ -2232,6 +2234,12 @@ def _sync_call_update(
     call_sid: str,
     fields: dict[str, Any],
 ) -> None:
+    if settings.reservation_lab_booking_enabled:
+        from app.services.reservation_lab_voice import sync_voice_call_log_update
+
+        sync_voice_call_log_update(call_sid=call_sid, fields=fields)
+        return
+
     db: Session = db_factory()
     try:
         call = db.scalar(select(CallLog).where(CallLog.twilio_call_sid == call_sid))
@@ -3456,16 +3464,14 @@ async def bridge_twilio_media_stream(
             state.tool_events.append(_make_auto_escalate_exception_event(exc, bool(transferred)))
             if transferred:
                 state.outcome = "escalated"
-        await _update_call(
-            db_factory,
-            call_sid=call_sid,
-            provider_call_id=state.openai_session_id or call_sid,
-            call_status=state.call_status,
-            outcome=state.outcome,
-            transcript_preview="\n".join(state.transcript_lines),
-            summary=_build_final_call_summary(state),
-            booking_id=state.current_booking_id,
-            extra_data={
+        final_fields = {
+            "provider_call_id": state.openai_session_id or call_sid,
+            "call_status": state.call_status,
+            "outcome": state.outcome,
+            "transcript_preview": "\n".join(state.transcript_lines),
+            "summary": _build_final_call_summary(state),
+            "booking_id": state.current_booking_id,
+            "extra_data": {
                 "openai_session_id": state.openai_session_id,
                 "caller_phone": from_number,
                 "called_number": to_number,
@@ -3478,8 +3484,20 @@ async def bridge_twilio_media_stream(
                 "transferred_to_restaurant": transferred,
                 "error": str(exc),
             },
-            duration_seconds=max(int((datetime.now(UTC) - state.started_at).total_seconds()), 0),
-        )
+            "duration_seconds": max(int((datetime.now(UTC) - state.started_at).total_seconds()), 0),
+        }
+        if settings.reservation_lab_booking_enabled:
+            from app.services.reservation_lab_voice import finalize_voice_call_log
+
+            await asyncio.to_thread(
+                finalize_voice_call_log,
+                call_sid=call_sid,
+                restaurant_id=str(getattr(restaurant, "id", None) or settings.default_restaurant_id),
+                caller_audio_ulaw=bytes(state.recorded_caller_audio_ulaw),
+                **final_fields,
+            )
+        else:
+            await _update_call(db_factory, call_sid=call_sid, **final_fields)
         json_log(
             "app.twilio",
             {
@@ -3506,16 +3524,14 @@ async def bridge_twilio_media_stream(
             ):
                 final_booking_id = tool_event["result"].get("booking_id")
                 break
-    await _update_call(
-        db_factory,
-        call_sid=call_sid,
-        provider_call_id=state.openai_session_id or call_sid,
-        call_status=state.call_status,
-        outcome=state.outcome,
-        transcript_preview="\n".join(state.transcript_lines),
-        summary=_build_final_call_summary(state),
-        booking_id=final_booking_id,
-        extra_data={
+    final_fields = {
+        "provider_call_id": state.openai_session_id or call_sid,
+        "call_status": state.call_status,
+        "outcome": state.outcome,
+        "transcript_preview": "\n".join(state.transcript_lines),
+        "summary": _build_final_call_summary(state),
+        "booking_id": final_booking_id,
+        "extra_data": {
             "openai_session_id": state.openai_session_id,
             "caller_phone": from_number,
             "called_number": to_number,
@@ -3526,8 +3542,20 @@ async def bridge_twilio_media_stream(
             "conversation_summary": _build_final_conversation_summary(state),
             "dropped_input_audio_packets": state.dropped_input_audio_packets,
         },
-        duration_seconds=max(int((datetime.now(UTC) - state.started_at).total_seconds()), 0),
-    )
+        "duration_seconds": max(int((datetime.now(UTC) - state.started_at).total_seconds()), 0),
+    }
+    if settings.reservation_lab_booking_enabled:
+        from app.services.reservation_lab_voice import finalize_voice_call_log
+
+        await asyncio.to_thread(
+            finalize_voice_call_log,
+            call_sid=call_sid,
+            restaurant_id=str(getattr(restaurant, "id", None) or settings.default_restaurant_id),
+            caller_audio_ulaw=bytes(state.recorded_caller_audio_ulaw),
+            **final_fields,
+        )
+    else:
+        await _update_call(db_factory, call_sid=call_sid, **final_fields)
     json_log(
         "app.twilio",
         {

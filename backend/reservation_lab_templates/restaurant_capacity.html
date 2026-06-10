@@ -8,7 +8,14 @@
   <p class="lab-muted" style="margin-top:0.35rem">{{ capacity.restaurant.restaurant_name }} <span class="lab-muted">({{ restaurant_id }})</span></p>
   {% endif %}
   <p class="lab-muted" style="margin-top:0.5rem">
-    <a class="lab-capacity-back" href="{{ url_for('add_restaurant_pick') }}" data-i18n="capacityBackToList">← Back to restaurant list</a>
+    {% if from_manual %}
+    <a class="lab-capacity-back" href="{{ url_for('restaurant_manual_reservation', restaurant_id=restaurant_id) }}" data-i18n="manualBackToForm">← Back to manual reservation</a>
+    {% if requested_time %}
+    <span class="lab-muted"> · {{ service_date }} {{ requested_time }}</span>
+    {% endif %}
+    {% else %}
+    <a class="lab-capacity-back" href="{{ url_for('owner_dashboard') }}" data-i18n="capacityBackToDash">← Back to dashboard</a>
+    {% endif %}
   </p>
 
   {% if db_error %}

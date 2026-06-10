@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Login — Reservation Lab{% endblock %}
+{% block content %}
+<div class="lab-pick-inner lab-login-page" style="max-width:24rem;margin:0 auto">
+  <p class="lab-pick-kicker" data-i18n="appName">Reservation Lab</p>
+  <h1 class="lab-pick-title" data-i18n="loginTitle">Login</h1>
+  <p class="lab-pick-lead" data-i18n="loginLead">Sign in to manage your restaurant.</p>
+
+  {% if login_error %}
+  <p class="lab-muted" style="color:var(--lab-terracotta);margin-top:0.75rem">{{ login_error }}</p>
+  {% endif %}
+
+  <form class="lab-card lab-book-form" method="post" action="{{ url_for('owner_login') }}" style="margin-top:1.25rem">
+    {% if next_url %}
+    <input type="hidden" name="next" value="{{ next_url }}" />
+    {% endif %}
+    <div class="lab-field">
+      <label for="login-username" data-i18n="loginUsername">Username</label>
+      <input id="login-username" name="username" type="text" autocomplete="username" required autofocus />
+    </div>
+    <div class="lab-field">
+      <label for="login-password" data-i18n="loginPassword">Password</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required />
+    </div>
+    <div class="lab-actions">
+      <button type="submit" class="lab-btn lab-btn-primary" data-i18n="loginSubmit">Sign in</button>
+      <a class="lab-btn lab-btn-secondary" href="{{ url_for('index') }}" data-i18n="navHome">Home</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -8,6 +8,7 @@ from typing import Any
 import psycopg
 
 from app.reservation_lab.db import execute, fetch_all, fetch_one
+from app.reservation_lab.owner_credentials import get_owner_username, has_owner_credentials_table, upsert_owner_credentials
 
 
 def has_floor_layout_column(conn: psycopg.Connection[Any]) -> bool:
@@ -190,7 +191,12 @@ def load_bundle(conn: psycopg.Connection[Any], restaurant_id: str) -> dict[str, 
         "tables": tables_ui,
         "floor_layout": floor_out,
         "opening_times": opening,
+        "owner_login": {"username": "", "password": ""},
     }
+    if has_owner_credentials_table(conn):
+        existing_username = get_owner_username(conn, restaurant_id)
+        if existing_username:
+            bundle["owner_login"]["username"] = existing_username
     return bundle
 
 
@@ -252,6 +258,7 @@ def default_new_bundle() -> dict[str, Any]:
         ],
         "floor_layout": {"tables": {"t1": dict(_default_layout_for_index(0))}},
         "opening_times": [],
+        "owner_login": {"username": "", "password": ""},
     }
 
 
@@ -322,6 +329,9 @@ def _save_bundle_tx(conn: psycopg.Connection[Any], payload: dict[str, Any]) -> N
     max_moves = int(payload.get("max_capacity_equivalent_moves_allowed") or 0)
     fallback = bool(payload.get("default_location_fallback_allowed", True))
     strategy = str(payload.get("allocation_strategy") or "prefer_single_table").strip()
+    restaurant_exists = (
+        fetch_one(conn, "SELECT 1 AS ok FROM restaurants WHERE restaurant_id = %s", (rid,)) is not None
+    )
 
     with conn.transaction():
         execute(
@@ -461,3 +471,24 @@ def _save_bundle_tx(conn: psycopg.Connection[Any], payload: dict[str, Any]) -> N
                 """,
                 (merge_id, rid, [a, b]),
             )
+
+        if has_owner_credentials_table(conn):
+            owner_login = payload.get("owner_login") or {}
+            login_username = str(owner_login.get("username") or "").strip()
+            login_password = str(owner_login.get("password") or "")
+            existing_username = get_owner_username(conn, rid)
+            if login_password:
+                if not login_username:
+                    login_username = existing_username or ""
+                if not login_username:
+                    raise ValueError("Owner login username is required when setting a password")
+                upsert_owner_credentials(
+                    conn,
+                    restaurant_id=rid,
+                    username=login_username,
+                    password=login_password,
+                )
+            elif not existing_username and not restaurant_exists:
+                raise ValueError(
+                    "Set owner login username and password (min 8 characters) so the restaurateur can sign in"
+                )

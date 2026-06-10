@@ -440,6 +440,16 @@
       '<div class="lab-field"><label data-i18n="labelWhatsapp">Whatsapp</label><input type="text" data-bind="whatsapp_phone_number" value="' +
       esc(state.whatsapp_phone_number || "") +
       '" /></div>';
+    if (window.__IS_NEW_PROFILE__) {
+      html += '<div class="lab-field lab-field--full"><h3 class="lab-setup-subhead" data-i18n="ownerLoginSection">Owner login</h3></div>';
+      html +=
+        '<div class="lab-field"><label data-i18n="labelOwnerUsername">Login username</label><input type="text" autocomplete="username" data-bind="owner_login.username" value="' +
+        esc(state.owner_login?.username || "") +
+        '" /></div>';
+      html +=
+        '<div class="lab-field"><label data-i18n="labelOwnerPassword">Login password</label><input type="password" autocomplete="new-password" data-bind="owner_login.password" value="" placeholder="" data-i18n-placeholder="ownerPasswordPlaceholder" /></div>';
+      html += '<p class="lab-muted lab-field--full" data-i18n="ownerPasswordHintNew">Min 8 characters. Used to sign in after the profile is saved.</p>';
+    }
     html += "</div></div></section>";
 
     html += '<section id="section-areas" class="lab-setup-section"><div class="lab-card"><h2 data-i18n="sectionAreas">Areas</h2>';
@@ -727,6 +737,19 @@
       toast("Fill business name and restaurant name.", false);
       return;
     }
+    if (window.__IS_NEW_PROFILE__) {
+      state.owner_login = state.owner_login || { username: "", password: "" };
+      const ownerUser = (state.owner_login.username || "").trim();
+      const ownerPass = state.owner_login.password || "";
+      if (!ownerUser || !ownerPass) {
+        toast(window.labI18n ? window.labI18n.t("ownerLoginRequired") : "Set owner login username and password.", false);
+        return;
+      }
+      if (ownerPass.length < 8) {
+        toast(window.labI18n ? window.labI18n.t("ownerPasswordTooShort") : "Password must be at least 8 characters.", false);
+        return;
+      }
+    }
     const m = document.getElementById("lab-map-mount");
     if (m) renderTableMapView(m);
     else syncFloorFromTables();
@@ -740,6 +763,7 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || res.statusText);
+      if (state.owner_login) state.owner_login.password = "";
       toast(window.labI18n ? window.labI18n.t("toastSaved") : "Saved", true);
     } catch (e) {
       toast((window.labI18n ? window.labI18n.t("toastError") : "Error") + " " + e.message, false);
@@ -770,7 +794,11 @@
         country: "",
         email_address: "",
         whatsapp_phone_number: "",
+        owner_login: { username: "", password: "" },
       };
+    }
+    if (!state.owner_login) {
+      state.owner_login = { username: "", password: "" };
     }
     tryLoadLocal();
     if (!state.tables || !state.tables.length) {

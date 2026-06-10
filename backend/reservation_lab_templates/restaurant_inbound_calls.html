@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Inbound calls — Reservation Lab{% endblock %}
+{% block head_extra %}
+<script src="{{ url_for('static', filename='js/inbound-calls.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="lab-pick-inner lab-inbound-page" data-restaurant-id="{{ restaurant_id }}">
+  <p class="lab-pick-kicker" data-i18n="appName">Reservation Lab</p>
+  <h1 class="lab-pick-title" data-i18n="inboundTitle">Inbound calls</h1>
+  {% if context and context.restaurant %}
+  <p class="lab-muted" style="margin-top:0.35rem">{{ context.restaurant.restaurant_name }} <span class="lab-muted">({{ restaurant_id }})</span></p>
+  {% endif %}
+  <p class="lab-muted" style="margin-top:0.5rem">
+    <a class="lab-capacity-back" href="{{ url_for('owner_dashboard') }}" data-i18n="capacityBackToDash">← Back to dashboard</a>
+  </p>
+
+  {% if db_error %}
+  <div class="lab-card lab-muted" style="border-color:#fecaca;margin-top:1rem">{{ db_error }}</div>
+  {% elif not context %}
+  <p class="lab-muted" style="margin-top:1rem" data-i18n="inboundLoadError">Could not load inbound calls.</p>
+  {% else %}
+  <p class="lab-pick-lead" data-i18n="inboundLead">
+    Voice calls handled by the AI agent. Review transcripts, listen to recordings, and manually complete bookings when needed.
+  </p>
+
+  <form class="lab-capacity-filters" method="get" action="{{ url_for('restaurant_inbound_calls', restaurant_id=restaurant_id) }}">
+    <div class="lab-field">
+      <label for="inbound-service-date" data-i18n="inboundDate">Date (optional)</label>
+      <input id="inbound-service-date" type="date" name="service_date" value="{{ service_date or '' }}" />
+    </div>
+    <div class="lab-field">
+      <label for="inbound-days" data-i18n="inboundDays">Last N days</label>
+      <input id="inbound-days" type="number" name="days" min="1" max="90" value="{{ days }}" />
+    </div>
+    <div class="lab-actions" style="margin-top:0">
+      <button type="submit" class="lab-btn lab-btn-secondary" data-i18n="inboundApply">Apply</button>
+    </div>
+  </form>
+
+  <div class="lab-card" style="margin-top:1.25rem">
+    {% if context.calls and context.calls|length > 0 %}
+    <div class="lab-capacity-table-wrap lab-inbound-table-wrap">
+      <table class="lab-capacity-table lab-inbound-table" id="inbound-calls-table">
+        <thead>
+          <tr>
+            <th data-i18n="capacityColGuest">Guest</th>
+            <th data-i18n="capacityColPhone">Phone</th>
+            <th data-i18n="capacityColTime">Time</th>
+            <th data-i18n="capacityColParty">Covers</th>
+            <th data-i18n="capacityColTables">Tables</th>
+            <th data-i18n="capacityColHighchairs">High chairs</th>
+            <th data-i18n="inboundColTranscript">Transcript</th>
+            <th data-i18n="inboundColRecording">Recording</th>
+            <th data-i18n="inboundColConfidence">Confidence</th>
+            <th data-i18n="inboundColBookManual">Book manually</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in context.calls %}
+          <tr data-call-id="{{ c.call_log_id }}">
+            <td>{{ c.guest }}</td>
+            <td>{{ c.phone }}</td>
+            <td>{% if c.service_date and c.time != '—' %}{{ c.service_date }} {{ c.time }}{% else %}{{ c.time }}{% endif %}</td>
+            <td>{{ c.covers }}</td>
+            <td>{{ c.tables }}</td>
+            <td>{{ c.high_chairs }}</td>
+            <td>
+              <button type="button" class="lab-btn lab-btn-secondary lab-btn-compact js-open-transcript"
+                data-call-id="{{ c.call_log_id }}"
+                data-transcript-url="{{ url_for('api_voice_call_transcript', restaurant_id=restaurant_id, call_log_id=c.call_log_id) }}"
+                {% if not c.transcript and not c.summary %}disabled{% endif %}
+                data-i18n="inboundViewTranscript">View</button>
+            </td>
+            <td>
+              {% if c.audio_storage_path %}
+              <button type="button" class="lab-btn lab-btn-secondary lab-btn-compact js-play-recording"
+                data-audio-url="{{ url_for('api_voice_call_recording', restaurant_id=restaurant_id, call_log_id=c.call_log_id) }}"
+                data-i18n="inboundPlay">Play</button>
+              {% else %}
+              <span class="lab-muted" data-i18n="inboundNoRecording">—</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="lab-confidence lab-confidence--{{ 'high' if c.confidence_level >= 80 else ('mid' if c.confidence_level >= 50 else 'low') }}">
+                {{ c.confidence_level }}%
+              </span>
+            </td>
+            <td>
+              <button type="button" class="lab-btn lab-btn-primary lab-btn-compact js-book-manual"
+                data-call-id="{{ c.call_log_id }}"
+                data-phone="{{ c.phone }}"
+                data-guest="{{ c.guest }}"
+                data-i18n="inboundBookManual">Book</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="lab-muted" data-i18n="inboundEmpty">No inbound calls recorded yet. They will appear here after Twilio voice calls.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div id="lab-transcript-modal" class="lab-modal" hidden aria-hidden="true">
+  <div class="lab-modal-backdrop js-close-modal"></div>
+  <div class="lab-modal-panel" role="dialog" aria-labelledby="lab-transcript-title">
+    <h2 id="lab-transcript-title" class="lab-modal-title" data-i18n="inboundTranscriptTitle">Call transcript</h2>
+    <p id="lab-transcript-summary" class="lab-muted lab-modal-summary"></p>
+    <pre id="lab-transcript-body" class="lab-modal-pre"></pre>
+    <div class="lab-actions">
+      <button type="button" class="lab-btn lab-btn-secondary js-close-modal" data-i18n="inboundClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="lab-book-modal" class="lab-modal" hidden aria-hidden="true">
+  <div class="lab-modal-backdrop js-close-modal"></div>
+  <div class="lab-modal-panel lab-modal-panel--wide" role="dialog" aria-labelledby="lab-book-title">
+    <h2 id="lab-book-title" class="lab-modal-title" data-i18n="inboundBookTitle">Book manually</h2>
+    <p class="lab-muted" data-i18n="inboundBookLead">Create a confirmed reservation linked to this call.</p>
+    <form id="lab-book-form" class="lab-book-form">
+      <input type="hidden" name="call_log_id" id="book-call-log-id" value="" />
+      <div class="lab-field">
+        <label for="book-customer-name" data-i18n="labelCustomerName">Customer name <span class="lab-required">*</span></label>
+        <input id="book-customer-name" name="customer_name" required />
+      </div>
+      <div class="lab-field">
+        <label for="book-phone" data-i18n="capacityColPhone">Phone</label>
+        <input id="book-phone" name="phone_number" />
+      </div>
+      <div class="lab-field-row">
+        <div class="lab-field">
+          <label for="book-date" data-i18n="inboundDate">Date <span class="lab-required">*</span></label>
+          <input id="book-date" name="date" type="date" required />
+        </div>
+        <div class="lab-field">
+          <label for="book-time" data-i18n="capacityColTime">Time <span class="lab-required">*</span></label>
+          <input id="book-time" name="time" type="time" required />
+        </div>
+      </div>
+      <div class="lab-field-row">
+        <div class="lab-field">
+          <label for="book-party" data-i18n="capacityColParty">Covers <span class="lab-required">*</span></label>
+          <input id="book-party" name="party_size" type="number" min="1" required />
+        </div>
+        <div class="lab-field">
+          <label for="book-highchairs" data-i18n="capacityColHighchairs">High chairs</label>
+          <input id="book-highchairs" name="high_chairs_requested" type="number" min="0" value="0" />
+        </div>
+      </div>
+      <div class="lab-field">
+        <label for="book-area" data-i18n="inboundPreferredArea">Preferred area</label>
+        <input id="book-area" name="preferred_area" />
+      </div>
+      <div class="lab-field">
+        <label for="book-notes" data-i18n="inboundSpecialRequests">Special requests</label>
+        <textarea id="book-notes" name="special_requests" rows="2"></textarea>
+      </div>
+      <p id="lab-book-error" class="lab-muted" style="color:var(--lab-terracotta);display:none"></p>
+      <div class="lab-actions">
+        <button type="button" class="lab-btn lab-btn-secondary js-close-modal" data-i18n="inboundClose">Close</button>
+        <button type="submit" class="lab-btn lab-btn-primary" data-i18n="inboundBookSubmit">Save booking</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<audio id="lab-call-audio" preload="none"></audio>
+{% endblock %}

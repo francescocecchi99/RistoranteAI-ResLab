@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Owner — Reservation Lab{% endblock %}
+{% block content %}
+<div class="lab-pick-inner">
+  <p class="lab-pick-kicker" data-i18n="appName">Reservation Lab</p>
+  <h1 class="lab-pick-title">{{ restaurant.restaurant_name }}</h1>
+  <p class="lab-muted" style="margin-top:0.35rem"><span class="lab-muted">({{ restaurant.restaurant_id }})</span></p>
+
+  {% if db_error %}
+  <div class="lab-card lab-muted" style="border-color:#fecaca;margin-top:1rem">{{ db_error }}</div>
+  {% else %}
+  <p class="lab-pick-lead" data-i18n="ownerDashLead">Choose what you want to manage.</p>
+  <ul class="lab-pick-list lab-owner-dash-list" style="margin-top:1.25rem">
+    <li>
+      <a class="lab-pick-sublink lab-owner-dash-link" href="{{ url_for('add_restaurant_setup', restaurant_id=restaurant.restaurant_id) }}" data-i18n="pickLinkSettings">Initial settings</a>
+    </li>
+    <li>
+      <a class="lab-pick-sublink lab-owner-dash-link" href="{{ url_for('restaurant_capacity', restaurant_id=restaurant.restaurant_id) }}" data-i18n="pickLinkCapacity">Capacity</a>
+    </li>
+    <li>
+      <a class="lab-pick-sublink lab-owner-dash-link" href="{{ url_for('restaurant_inbound_calls', restaurant_id=restaurant.restaurant_id) }}" data-i18n="pickLinkInbound">Inbound calls</a>
+    </li>
+    <li>
+      <a class="lab-pick-sublink lab-owner-dash-link" href="{{ url_for('restaurant_manual_reservation', restaurant_id=restaurant.restaurant_id) }}" data-i18n="pickLinkManual">Add manually</a>
+    </li>
+  </ul>
+  {% endif %}
+</div>
+{% endblock %}

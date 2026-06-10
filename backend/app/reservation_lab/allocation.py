@@ -172,3 +172,111 @@ def find_best_allocation(
         "debug": debug,
     }
 
+
+def list_allocation_options(
+    restaurant: dict[str, Any],
+    areas: list[dict[str, Any]],
+    tables: list[dict[str, Any]],
+    merges: list[dict[str, Any]],
+    occupied_table_ids: set[str],
+    party_size: int,
+    preferred_area: str | None,
+    high_chairs_requested: int,
+    *,
+    restrict_to_preferred_area: bool = False,
+) -> list[dict[str, Any]]:
+    tables_by_id = {t["table_id"]: t for t in tables if t["active"]}
+    if restrict_to_preferred_area and preferred_area:
+        area_order = [a for a in areas if _matches_preferred(a, preferred_area)]
+    else:
+        area_order = _build_area_order(restaurant, areas, preferred_area)
+    all_candidates: list[dict[str, Any]] = []
+
+    for area in area_order:
+        area_id = area["area_id"]
+        is_preferred_area = _matches_preferred(area, preferred_area) if preferred_area else True
+
+        for table in tables:
+            if not table["active"] or table["table_id"] in occupied_table_ids:
+                continue
+            if table["area_id"] != area_id:
+                continue
+            if table["max_capacity"] < party_size:
+                continue
+            if high_chairs_requested > 0 and not table["high_chair_allowed"]:
+                continue
+            head_seats_used = max(0, party_size - table["base_capacity"])
+            if head_seats_used > table["head_seats_max"]:
+                continue
+            wasted_seats = table["max_capacity"] - party_size
+            candidate = {
+                "type": "single",
+                "assigned_tables": [table["table_id"]],
+                "assigned_merge_id": None,
+                "area": area["area_name"],
+                "head_seats_used": head_seats_used,
+                "wasted_seats": wasted_seats,
+                "uses_prefer_keep_free": bool(table["prefer_to_keep_free"]),
+                "is_preferred_area": is_preferred_area,
+                "sort_key": (
+                    0 if not table["prefer_to_keep_free"] else 1,
+                    FILL_PRIORITY_WEIGHT.get(table["fill_priority"], 1),
+                    table["max_capacity"],
+                    wasted_seats,
+                ),
+            }
+            candidate["score"] = _score_candidate(candidate, preferred_area)
+            all_candidates.append(candidate)
+
+        if not restaurant.get("table_merge_allowed", True):
+            continue
+
+        for merge in merges:
+            if not merge["active"]:
+                continue
+            merge_table_ids: list[str] = merge["merge_tables"]
+            if len(merge_table_ids) > restaurant.get("max_tables_per_merge", 2):
+                continue
+            if any(table_id in occupied_table_ids for table_id in merge_table_ids):
+                continue
+            merge_tables = [tables_by_id.get(tid) for tid in merge_table_ids]
+            if any(t is None for t in merge_tables):
+                continue
+            merge_area_ids = {t["area_id"] for t in merge_tables if t}
+            if len(merge_area_ids) != 1 or area_id not in merge_area_ids:
+                continue
+            if high_chairs_requested > 0 and not any(t["high_chair_allowed"] for t in merge_tables if t):
+                continue
+            merge_capacity = sum(t["base_capacity"] for t in merge_tables if t)
+            merge_max_capacity = sum(t["max_capacity"] for t in merge_tables if t)
+            total_head_seats_max = sum(t["head_seats_max"] for t in merge_tables if t)
+            if merge_max_capacity < party_size:
+                continue
+            head_seats_used = max(0, party_size - merge_capacity)
+            if head_seats_used > total_head_seats_max:
+                continue
+            wasted_seats = merge_max_capacity - party_size
+            uses_prefer_keep_free = any(t["prefer_to_keep_free"] for t in merge_tables if t)
+            candidate = {
+                "type": "merge",
+                "assigned_tables": merge_table_ids,
+                "assigned_merge_id": merge["merge_id"],
+                "area": area["area_name"],
+                "head_seats_used": head_seats_used,
+                "wasted_seats": wasted_seats,
+                "uses_prefer_keep_free": uses_prefer_keep_free,
+                "is_preferred_area": is_preferred_area,
+                "sort_key": (
+                    merge_max_capacity,
+                    len(merge_table_ids),
+                    head_seats_used,
+                    1 if uses_prefer_keep_free else 0,
+                    wasted_seats,
+                ),
+            }
+            candidate["score"] = _score_candidate(candidate, preferred_area)
+            all_candidates.append(candidate)
+
+    all_candidates.sort(key=lambda c: (-c["score"], c["sort_key"]))
+    return all_candidates
+

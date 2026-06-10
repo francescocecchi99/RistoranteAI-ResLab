@@ -1,17 +1,38 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 
 from app.reservation_lab.capacity_page import load_capacity_context
-from app.reservation_lab.db import get_connection
+from app.reservation_lab.db import fetch_one, get_connection
+from app.reservation_lab.inbound_calls_page import (
+    get_voice_call_row,
+    link_call_to_reservation,
+    load_inbound_calls_context,
+)
 from app.reservation_lab.models import BookingRequest
-from app.reservation_lab.reservations import confirm_pending_reservation, create_pending_reservation
+from app.reservation_lab.manual_reservation_page import load_manual_reservation_bootstrap, load_manual_reservation_options
+from app.reservation_lab.reservations import (
+    _load_turns,
+    _match_turn,
+    confirm_pending_reservation,
+    create_owner_manual_reservation,
+    create_pending_reservation,
+)
+from app.reservation_lab.owner_auth import (
+    is_logged_in,
+    login_owner,
+    logout_owner,
+    session_restaurant_id,
+    verify_credentials,
+)
+from app.reservation_lab.owner_credentials import get_owner_username, has_owner_credentials_table
 from app.reservation_lab.restaurant_crud import default_new_bundle, list_restaurants, load_bundle, save_bundle
+from app.reservation_lab.voice_recording import resolve_recording_file
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -22,6 +43,43 @@ app = Flask(
     static_url_path="/static",
 )
 app.secret_key = "reservation-lab-demo-dev"
+
+
+@app.before_request
+def _owner_auth_gate() -> Any:
+    path = request.path
+    if path in {"/", "/login", "/create-restaurant-profile"} or path.startswith("/static"):
+        return None
+    if path == "/agent":
+        return redirect(url_for("index"))
+    if path == "/add-restaurant-details/setup":
+        if request.args.get("new") == "1":
+            return None
+        rid = (request.args.get("restaurant_id") or "").strip()
+        if rid and _restaurant_needs_owner_bootstrap(rid):
+            return None
+    if path == "/api/restaurant/save" and request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        rid = str(data.get("restaurant_id") or "").strip()
+        if rid and _restaurant_needs_owner_bootstrap(rid):
+            return None
+    if is_logged_in():
+        return None
+    if path.startswith("/add-restaurant-details") or path == "/owner":
+        return redirect(url_for("owner_login", next=path))
+    if path.startswith("/api/restaurant") or path.startswith("/api/voice-calls"):
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    return None
+
+
+def _restaurant_needs_owner_bootstrap(restaurant_id: str) -> bool:
+    try:
+        with get_connection() as conn:
+            if not has_owner_credentials_table(conn):
+                return False
+            return get_owner_username(conn, restaurant_id) is None
+    except Exception:
+        return False
 
 
 DEFAULT_REQUEST = {
@@ -70,9 +128,84 @@ def index():
     return _render_home()
 
 
+@app.get("/create-restaurant-profile")
+def create_restaurant_profile():
+    return redirect(url_for("add_restaurant_setup", new=1))
+
+
+@app.get("/login")
+def owner_login():
+    if is_logged_in():
+        return redirect(url_for("owner_dashboard"))
+    next_url = (request.args.get("next") or "").strip()
+    return render_template(
+        "owner_login.html",
+        page_frame="pick",
+        login_error=None,
+        next_url=next_url,
+    )
+
+
+@app.post("/login")
+def owner_login_submit():
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+    next_url = (request.form.get("next") or "").strip()
+    restaurant_id = verify_credentials(username, password)
+    if not restaurant_id:
+        return render_template(
+            "owner_login.html",
+            page_frame="pick",
+            login_error="Invalid username or password.",
+            next_url=next_url,
+        )
+    login_owner(restaurant_id=restaurant_id, username=username)
+    if next_url and next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("owner_dashboard"))
+
+
+@app.get("/owner")
+def owner_dashboard():
+    restaurant_id = session_restaurant_id()
+    try:
+        with get_connection() as conn:
+            restaurant = fetch_one(
+                conn,
+                "SELECT restaurant_id, restaurant_name FROM restaurants WHERE restaurant_id = %s",
+                (restaurant_id,),
+            )
+    except Exception as exc:
+        return render_template(
+            "owner_dashboard.html",
+            page_frame="pick",
+            restaurant=None,
+            db_error=str(exc),
+        )
+    if not restaurant:
+        return render_template(
+            "owner_dashboard.html",
+            page_frame="pick",
+            restaurant={"restaurant_id": restaurant_id, "restaurant_name": restaurant_id},
+            db_error=f"Restaurant {restaurant_id} not found in database.",
+        )
+    return render_template(
+        "owner_dashboard.html",
+        page_frame="pick",
+        restaurant=restaurant,
+        db_error=None,
+    )
+
+
+@app.get("/logout")
+def owner_logout():
+    logout_owner()
+    return redirect(url_for("index"))
+
+
 @app.get("/agent")
 def agent_lab():
-    return _render_agent()
+    return redirect(url_for("index"))
 
 
 @app.post("/setup/schema")
@@ -93,6 +226,13 @@ def load_seed():
 
 @app.get("/add-restaurant-details")
 def add_restaurant_pick():
+    if not is_logged_in():
+        return redirect(url_for("owner_login"))
+    return redirect(url_for("owner_dashboard"))
+
+
+@app.get("/add-restaurant-details/_legacy-list")
+def add_restaurant_pick_legacy():
     restaurants: list[dict[str, Any]] = []
     db_error: str | None = None
     try:
@@ -105,6 +245,76 @@ def add_restaurant_pick():
         page_frame="pick",
         restaurants=restaurants,
         db_error=db_error,
+    )
+
+
+@app.get("/add-restaurant-details/<restaurant_id>/manual-reservation")
+def restaurant_manual_reservation(restaurant_id: str):
+    try:
+        with get_connection() as conn:
+            bootstrap = load_manual_reservation_bootstrap(conn, restaurant_id)
+    except Exception as exc:
+        return render_template(
+            "restaurant_manual_reservation.html",
+            page_frame="pick",
+            restaurant=None,
+            areas=[],
+            bootstrap_json="{}",
+            db_error=str(exc),
+            restaurant_id=restaurant_id,
+        )
+    if bootstrap.get("error") == "not_found":
+        return redirect(url_for("owner_dashboard", nf=1))
+    return render_template(
+        "restaurant_manual_reservation.html",
+        page_frame="pick",
+        restaurant=bootstrap["restaurant"],
+        areas=bootstrap.get("areas") or [],
+        bootstrap_json=json.dumps({"areas": bootstrap.get("areas") or []}),
+        db_error=None,
+        restaurant_id=restaurant_id,
+    )
+
+
+@app.get("/add-restaurant-details/<restaurant_id>/inbound-calls")
+def restaurant_inbound_calls(restaurant_id: str):
+    sd_raw = (request.args.get("service_date") or "").strip()
+    service_date: date | None = None
+    if sd_raw:
+        try:
+            service_date = date.fromisoformat(sd_raw)
+        except ValueError:
+            service_date = None
+    days = request.args.get("days", type=int) or 30
+    days = max(1, min(days, 90))
+
+    try:
+        with get_connection() as conn:
+            context = load_inbound_calls_context(
+                conn, restaurant_id, service_date=service_date, days=days
+            )
+    except Exception as exc:
+        return render_template(
+            "restaurant_inbound_calls.html",
+            page_frame="pick",
+            context=None,
+            db_error=str(exc),
+            restaurant_id=restaurant_id,
+            service_date=sd_raw,
+            days=days,
+        )
+
+    if context.get("error") == "not_found":
+        return redirect(url_for("owner_dashboard", nf=1))
+
+    return render_template(
+        "restaurant_inbound_calls.html",
+        page_frame="pick",
+        context=context,
+        db_error=None,
+        restaurant_id=restaurant_id,
+        service_date=sd_raw,
+        days=days,
     )
 
 
@@ -127,6 +337,22 @@ def restaurant_capacity(restaurant_id: str):
         except ValueError:
             turn_index = None
 
+    requested_time_raw = (request.args.get("time") or request.args.get("requested_time") or "").strip()
+    if requested_time_raw and meal_period is None and turn_index is None:
+        try:
+            requested_time = time.fromisoformat(
+                requested_time_raw if len(requested_time_raw) == 8 else f"{requested_time_raw}:00"
+            )
+            with get_connection() as conn:
+                matched = _match_turn(requested_time, _load_turns(conn, restaurant_id, service_date))
+            if matched:
+                meal_period = matched["meal_period"]
+                turn_index = matched["turn_index"]
+        except ValueError:
+            requested_time_raw = ""
+
+    from_manual = request.args.get("from") == "manual"
+
     try:
         with get_connection() as conn:
             capacity = load_capacity_context(conn, restaurant_id, service_date, meal_period, turn_index)
@@ -138,10 +364,12 @@ def restaurant_capacity(restaurant_id: str):
             db_error=str(exc),
             restaurant_id=restaurant_id,
             service_date=service_date.isoformat(),
+            from_manual=from_manual,
+            requested_time=requested_time_raw or None,
         )
 
     if capacity.get("error") == "not_found":
-        return redirect(url_for("add_restaurant_pick", nf=1))
+        return redirect(url_for("owner_dashboard", nf=1))
 
     return render_template(
         "restaurant_capacity.html",
@@ -150,6 +378,8 @@ def restaurant_capacity(restaurant_id: str):
         db_error=None,
         restaurant_id=restaurant_id,
         service_date=service_date.isoformat(),
+        from_manual=from_manual,
+        requested_time=requested_time_raw or None,
     )
 
 
@@ -163,22 +393,24 @@ def add_restaurant_setup():
             page_frame="setup",
             bundle_json=default_new_bundle(),
             load_error=None,
+            is_new_profile=True,
         )
     if rid:
         try:
             with get_connection() as conn:
                 bundle = load_bundle(conn, rid)
         except Exception as exc:
-            return redirect(url_for("add_restaurant_pick", err=str(exc)[:200]))
+            return redirect(url_for("owner_dashboard", err=str(exc)[:200]))
         if not bundle:
-            return redirect(url_for("add_restaurant_pick", nf=1))
+            return redirect(url_for("owner_dashboard", nf=1))
         return render_template(
             "restaurant_setup.html",
             page_frame="setup",
             bundle_json=bundle,
             load_error=None,
+            is_new_profile=False,
         )
-    return redirect(url_for("add_restaurant_pick"))
+    return redirect(url_for("owner_dashboard"))
 
 
 @app.get("/api/restaurants")
@@ -201,6 +433,159 @@ def api_restaurant_bundle(restaurant_id: str):
         return jsonify({"ok": True, "bundle": bundle})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/api/restaurant/<restaurant_id>/manual-reservation/options")
+def api_manual_reservation_options(restaurant_id: str):
+    sd_raw = (request.args.get("date") or "").strip()
+    if not sd_raw:
+        return jsonify({"ok": False, "error": "date is required"}), 400
+    try:
+        service_date = date.fromisoformat(sd_raw)
+    except ValueError:
+        return jsonify({"ok": False, "error": "invalid date"}), 400
+
+    requested_time: time | None = None
+    time_raw = (request.args.get("time") or "").strip()
+    if time_raw:
+        try:
+            requested_time = time.fromisoformat(time_raw if len(time_raw) == 8 else f"{time_raw}:00")
+        except ValueError:
+            return jsonify({"ok": False, "error": "invalid time"}), 400
+
+    party_size = request.args.get("party_size", type=int)
+    preferred_area = (request.args.get("preferred_area") or "").strip() or None
+    high_chairs = request.args.get("high_chairs_requested", type=int) or 0
+
+    try:
+        with get_connection() as conn:
+            options = load_manual_reservation_options(
+                conn,
+                restaurant_id=restaurant_id,
+                service_date=service_date,
+                requested_time=requested_time,
+                party_size=party_size,
+                preferred_area=preferred_area,
+                high_chairs_requested=high_chairs,
+            )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    if options.get("error") == "not_found":
+        return jsonify({"ok": False, "error": "not_found"}), 404
+
+    return jsonify({"ok": True, **options})
+
+
+@app.post("/api/restaurant/<restaurant_id>/manual-reservation")
+def api_manual_reservation(restaurant_id: str):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "Expected JSON object"}), 400
+
+    assigned_tables = data.pop("assigned_tables", None)
+    assigned_merge_id = data.pop("assigned_merge_id", None)
+    if not isinstance(assigned_tables, list) or not assigned_tables:
+        return jsonify({"ok": False, "error": "assigned_tables is required"}), 400
+
+    try:
+        data["restaurant_id"] = restaurant_id
+        booking_request = BookingRequest.model_validate(data)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    try:
+        with get_connection() as conn:
+            result = create_owner_manual_reservation(
+                conn,
+                booking_request,
+                assigned_tables=[str(t) for t in assigned_tables],
+                assigned_merge_id=str(assigned_merge_id) if assigned_merge_id else None,
+            )
+            if not result.get("db_saved"):
+                return jsonify({"ok": False, "error": result.get("reason") or "unavailable"}), 400
+            reservation_id = result["db_saved"]["reservation_id"]
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    return jsonify({"ok": True, "reservation_id": reservation_id})
+
+
+@app.get("/api/voice-calls/<restaurant_id>/<call_log_id>/transcript")
+def api_voice_call_transcript(restaurant_id: str, call_log_id: str):
+    try:
+        with get_connection() as conn:
+            row = get_voice_call_row(conn, call_log_id, restaurant_id)
+        if not row:
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        return jsonify(
+            {
+                "ok": True,
+                "transcript": row.get("transcript") or "",
+                "summary": row.get("summary") or "",
+            }
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.get("/api/voice-calls/<restaurant_id>/<call_log_id>/recording")
+def api_voice_call_recording(restaurant_id: str, call_log_id: str):
+    try:
+        with get_connection() as conn:
+            row = get_voice_call_row(conn, call_log_id, restaurant_id)
+        if not row or not row.get("audio_storage_path"):
+            return jsonify({"ok": False, "error": "not_found"}), 404
+        path = row["audio_storage_path"]
+        if str(path).startswith("http"):
+            return redirect(path)
+        file_path = resolve_recording_file(str(path))
+        if not file_path:
+            return jsonify({"ok": False, "error": "recording_missing"}), 404
+        return send_file(file_path, mimetype="audio/wav", conditional=True)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.post("/api/voice-calls/<restaurant_id>/<call_log_id>/book-manually")
+def api_voice_call_book_manually(restaurant_id: str, call_log_id: str):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"ok": False, "error": "Expected JSON object"}), 400
+    try:
+        data["restaurant_id"] = restaurant_id
+        booking_request = BookingRequest.model_validate(data)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    call_row: dict | None = None
+    reservation_id: str | None = None
+    try:
+        with get_connection() as conn:
+            call_row = get_voice_call_row(conn, call_log_id, restaurant_id)
+            if not call_row:
+                return jsonify({"ok": False, "error": "call_not_found"}), 404
+            if not booking_request.phone_number and call_row.get("caller_phone"):
+                booking_request = booking_request.model_copy(
+                    update={"phone_number": call_row.get("caller_phone")}
+                )
+            pending = create_pending_reservation(conn, booking_request)
+            if not pending.get("db_saved"):
+                return jsonify({"ok": False, "error": pending.get("reason") or "unavailable"}), 400
+            reservation_id = pending["db_saved"]["reservation_id"]
+            confirmed = confirm_pending_reservation(conn, reservation_id, booking_request)
+            if not confirmed.get("db_saved"):
+                return jsonify({"ok": False, "error": confirmed.get("reason") or "confirm_failed"}), 400
+            link_call_to_reservation(
+                conn,
+                call_log_id=call_log_id,
+                restaurant_id=restaurant_id,
+                reservation_id=reservation_id,
+            )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    return jsonify({"ok": True, "reservation_id": reservation_id})
 
 
 @app.post("/api/restaurant/save")

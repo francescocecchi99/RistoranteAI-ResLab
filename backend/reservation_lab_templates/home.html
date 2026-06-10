@@ -10,9 +10,9 @@
   <p class="lab-muted" style="margin-top:1rem;text-align:center;max-width:28rem;margin-left:auto;margin-right:auto">{{ setup_message }}</p>
   {% endif %}
 
-  <div class="lab-home-view-toggles" role="group" aria-label="View mode">
-    <a class="lab-btn lab-btn-secondary lab-home-view-toggle" href="{{ url_for('add_restaurant_pick') }}" data-i18n="homeOwnerView">Owner view</a>
-    <a class="lab-btn lab-btn-secondary lab-home-view-toggle" href="{{ url_for('agent_lab') }}" data-i18n="homeAgentView">Agent view</a>
+  <div class="lab-home-view-toggles" role="group" aria-label="Get started">
+    <a class="lab-btn lab-btn-primary lab-home-view-toggle" href="{{ url_for('create_restaurant_profile') }}" data-i18n="homeCreateProfile">Create restaurant profile</a>
+    <a class="lab-btn lab-btn-secondary lab-home-view-toggle" href="{{ url_for('owner_login') }}" data-i18n="homeLogin">Login</a>
   </div>
 
   <div class="lab-marketing-lang" aria-label="Language">

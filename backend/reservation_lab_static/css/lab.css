@@ -467,6 +467,127 @@ body.lab-page-pick {
   margin-top: 0.35rem;
 }
 
+.lab-inbound-table-wrap {
+  max-width: 100%;
+}
+
+.lab-inbound-table {
+  min-width: 56rem;
+}
+
+.lab-btn-compact {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.75rem;
+}
+
+.lab-confidence {
+  font-weight: 700;
+  font-size: 0.8125rem;
+}
+
+.lab-confidence--high {
+  color: #166534;
+}
+
+.lab-confidence--mid {
+  color: #a16207;
+}
+
+.lab-confidence--low {
+  color: var(--lab-terracotta);
+}
+
+.lab-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.lab-modal[hidden] {
+  display: none !important;
+}
+
+.lab-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(28, 21, 18, 0.45);
+}
+
+.lab-modal-panel {
+  position: relative;
+  z-index: 1;
+  width: min(36rem, 100%);
+  max-height: min(80vh, 640px);
+  overflow: auto;
+  background: var(--lab-card);
+  border: 1px solid var(--lab-border);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  box-shadow: var(--shadow-card);
+}
+
+.lab-modal-panel--wide {
+  width: min(28rem, 100%);
+}
+
+.lab-modal-title {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-serif);
+  color: var(--lab-heading);
+}
+
+.lab-modal-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  background: rgba(245, 236, 228, 0.5);
+  border: 1px solid var(--lab-border-soft);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.lab-book-form .lab-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.lab-required {
+  color: var(--lab-terracotta);
+}
+
+.lab-owner-dash-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.lab-owner-dash-link {
+  display: block;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--lab-border);
+  border-radius: 0.75rem;
+  background: var(--lab-card);
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--lab-heading);
+}
+
+.lab-owner-dash-link:hover {
+  border-color: var(--lab-terracotta);
+  color: var(--lab-terracotta);
+}
+
 .lab-capacity-map {
   margin-top: 1.5rem;
 }
@@ -958,6 +1079,17 @@ body.lab-page-setup {
   display: grid;
   gap: 0.75rem 1rem;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.lab-field--full {
+  grid-column: 1 / -1;
+}
+
+.lab-setup-subhead {
+  margin: 0.5rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--lab-heading);
 }
 
 .lab-field label {

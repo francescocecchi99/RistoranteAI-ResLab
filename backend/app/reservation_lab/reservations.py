@@ -396,6 +396,181 @@ def create_pending_reservation(conn: psycopg.Connection[Any], request: BookingRe
     }
 
 
+def create_owner_manual_reservation(
+    conn: psycopg.Connection[Any],
+    request: BookingRequest,
+    *,
+    assigned_tables: list[str],
+    assigned_merge_id: str | None,
+) -> dict[str, Any]:
+    from app.reservation_lab.allocation import list_allocation_options
+    from app.reservation_lab.manual_reservation_page import load_manual_reservation_options
+
+    if not assigned_tables:
+        return {"db_saved": None, "reason": "Select a table or merge."}
+
+    options = load_manual_reservation_options(
+        conn,
+        restaurant_id=request.restaurant_id,
+        service_date=request.date,
+        requested_time=request.time,
+        party_size=request.party_size,
+        preferred_area=request.preferences.preferred_area,
+        high_chairs_requested=request.high_chairs_requested,
+    )
+    if options.get("closed"):
+        return {"db_saved": None, "reason": options.get("reason") or "Restaurant is closed."}
+    if options.get("reason"):
+        return {"db_saved": None, "reason": options["reason"]}
+
+    selected = None
+    for opt in options.get("table_options", []):
+        if opt["assigned_tables"] == assigned_tables and opt.get("assigned_merge_id") == assigned_merge_id:
+            selected = opt
+            break
+    if not selected:
+        return {"db_saved": None, "reason": "Selected table is not available for this date, time, and party size."}
+
+    turns = _load_turns(conn, request.restaurant_id, request.date)
+    matched_turn = _match_turn(request.time, turns)
+    if not matched_turn:
+        return {"db_saved": None, "reason": "No active service turn for the requested time."}
+
+    restaurant = fetch_one(conn, "SELECT * FROM restaurants WHERE restaurant_id = %s", (request.restaurant_id,))
+    areas = fetch_all(
+        conn,
+        "SELECT area_id, area_name, sort_order, active FROM restaurant_areas WHERE restaurant_id = %s AND active = true ORDER BY sort_order",
+        (request.restaurant_id,),
+    )
+    tables = fetch_all(
+        conn,
+        """
+        SELECT table_id, area_id, table_name, base_capacity, head_seats_max, max_capacity,
+               high_chair_allowed, prefer_to_keep_free, fill_priority, active
+        FROM restaurant_tables WHERE restaurant_id = %s AND active = true
+        """,
+        (request.restaurant_id,),
+    )
+    merges = fetch_all(
+        conn,
+        "SELECT merge_id, merge_tables, active FROM restaurant_table_merges WHERE restaurant_id = %s AND active = true",
+        (request.restaurant_id,),
+    )
+    occupied_rows = fetch_all(
+        conn,
+        """
+        SELECT table_id FROM reservation_table_assignments
+        WHERE restaurant_id = %s AND service_date = %s AND meal_period = %s AND turn_index = %s
+        """,
+        (
+            request.restaurant_id,
+            request.date,
+            matched_turn["meal_period"],
+            matched_turn["turn_index"],
+        ),
+    )
+    occupied_table_ids = {row["table_id"] for row in occupied_rows}
+    candidates = list_allocation_options(
+        restaurant=restaurant,
+        areas=areas,
+        tables=tables,
+        merges=merges,
+        occupied_table_ids=occupied_table_ids,
+        party_size=request.party_size,
+        preferred_area=request.preferences.preferred_area,
+        high_chairs_requested=request.high_chairs_requested,
+        restrict_to_preferred_area=bool(request.preferences.preferred_area),
+    )
+    match_alloc = next(
+        (
+            c
+            for c in candidates
+            if c["assigned_tables"] == assigned_tables and c.get("assigned_merge_id") == assigned_merge_id
+        ),
+        None,
+    )
+    if not match_alloc:
+        return {"db_saved": None, "reason": "Selected table is not available for this date, time, and party size."}
+
+    preview = _build_payload(request, matched_turn, match_alloc, reservation_id=None)
+    reservation_id = generate_id("res")
+    assignment_rows = [
+        {
+            "assignment_id": generate_id("asg"),
+            "table_id": table_id,
+            "is_primary_table": idx == 0,
+            "seats_assigned": request.party_size if idx == 0 else 0,
+        }
+        for idx, table_id in enumerate(assigned_tables)
+    ]
+
+    for _attempt in range(2):
+        try:
+            with conn.transaction():
+                execute(
+                    conn,
+                    """
+                    INSERT INTO restaurant_reservations (
+                      reservation_id, restaurant_id, service_date, requested_time, meal_period, turn_index,
+                      customer_name, phone_number, party_size, high_chairs_requested, head_seats_used,
+                      preferences, original_agent_text, source_payload, status
+                    ) VALUES (
+                      %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s, %s,
+                      %s::jsonb, %s, %s::jsonb, %s
+                    )
+                    """,
+                    (
+                        reservation_id,
+                        preview.restaurant_id,
+                        preview.service_date,
+                        preview.requested_time,
+                        preview.meal_period,
+                        preview.turn_index,
+                        preview.customer_name,
+                        preview.phone_number,
+                        preview.party_size,
+                        request.high_chairs_requested,
+                        preview.head_seats_used,
+                        psycopg.types.json.Json(preview.preferences),
+                        request.original_agent_text,
+                        psycopg.types.json.Json(request.model_dump(mode="json")),
+                        "confirmed",
+                    ),
+                )
+                for row in assignment_rows:
+                    execute(
+                        conn,
+                        """
+                        INSERT INTO reservation_table_assignments (
+                          assignment_id, reservation_id, restaurant_id, service_date,
+                          meal_period, turn_index, table_id, merge_id, seats_assigned, is_primary_table
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            row["assignment_id"],
+                            reservation_id,
+                            preview.restaurant_id,
+                            preview.service_date,
+                            preview.meal_period,
+                            preview.turn_index,
+                            row["table_id"],
+                            preview.assigned_merge_id,
+                            row["seats_assigned"],
+                            row["is_primary_table"],
+                        ),
+                    )
+            saved = preview.model_dump()
+            saved["reservation_id"] = reservation_id
+            saved["status"] = "confirmed"
+            return {"db_saved": saved}
+        except psycopg.errors.UniqueViolation:
+            conn.rollback()
+            continue
+
+    return {"db_saved": None, "reason": "Could not assign the selected table (conflict). Try another table."}
+
+
 def confirm_pending_reservation(conn: psycopg.Connection[Any], reservation_id: str, request: BookingRequest) -> dict[str, Any]:
     if not reservation_id:
         return {

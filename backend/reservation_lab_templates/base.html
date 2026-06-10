@@ -16,7 +16,11 @@
   {% elif frame == 'pick' %}
   <div class="lab-pick-page">
     <header class="lab-pick-topbar">
+      {% if session.get('owner_logged_in') %}
+      <a href="{{ url_for('owner_logout') }}" class="lab-pick-toplink" data-i18n="loginLogout">Log out</a>
+      {% else %}
       <a href="{{ url_for('index') }}" class="lab-pick-toplink" data-i18n="navHome">Home</a>
+      {% endif %}
       <div class="lab-pick-lang">
         <button type="button" class="lab-mLangBtn is-active" data-lang="en" aria-pressed="true">English</button>
         <button type="button" class="lab-mLangBtn" data-lang="it" aria-pressed="false">Italiano</button>
@@ -45,7 +49,11 @@
           <button type="button" class="lab-mLangBtn is-active" data-lang="en" aria-pressed="true">English</button>
           <button type="button" class="lab-mLangBtn" data-lang="it" aria-pressed="false">Italiano</button>
         </div>
-        <a href="{{ url_for('add_restaurant_pick') }}" class="lab-section-backlink" data-i18n="setupBack">← Back to list</a>
+        {% if session.get('owner_logged_in') %}
+        <a href="{{ url_for('owner_dashboard') }}" class="lab-section-backlink" data-i18n="setupBack">← Back to dashboard</a>
+        {% else %}
+        <a href="{{ url_for('index') }}" class="lab-section-backlink" data-i18n="setupBackHome">← Back to home</a>
+        {% endif %}
       </div>
     </aside>
     <div class="lab-setup-main-scroll">

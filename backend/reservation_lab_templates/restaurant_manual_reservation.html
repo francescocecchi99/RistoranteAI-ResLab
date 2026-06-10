@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Add manually — Reservation Lab{% endblock %}
+{% block head_extra %}
+<script id="manual-bootstrap" type="application/json">{{ bootstrap_json|safe }}</script>
+<script src="{{ url_for('static', filename='js/manual-reservation.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<div class="lab-pick-inner lab-manual-page" data-restaurant-id="{{ restaurant_id }}">
+  <p class="lab-pick-kicker" data-i18n="appName">Reservation Lab</p>
+  <h1 class="lab-pick-title" data-i18n="manualTitle">Add manually</h1>
+  {% if restaurant %}
+  <p class="lab-muted" style="margin-top:0.35rem">{{ restaurant.restaurant_name }} <span class="lab-muted">({{ restaurant_id }})</span></p>
+  {% endif %}
+  <p class="lab-muted" style="margin-top:0.5rem">
+    <a class="lab-capacity-back" href="{{ url_for('owner_dashboard') }}" data-i18n="capacityBackToDash">← Back to dashboard</a>
+  </p>
+
+  {% if db_error %}
+  <div class="lab-card lab-muted" style="border-color:#fecaca;margin-top:1rem">{{ db_error }}</div>
+  {% else %}
+  <p class="lab-pick-lead" data-i18n="manualLead">
+    Create a confirmed reservation directly in the database. Required fields are marked with *.
+  </p>
+
+  <div class="lab-card" style="margin-top:1.25rem;max-width:36rem">
+    <form id="lab-manual-reservation-form" class="lab-book-form">
+      <div class="lab-field">
+        <label for="manual-customer-name" data-i18n="labelCustomerName">Customer name <span class="lab-required">*</span></label>
+        <input id="manual-customer-name" name="customer_name" required autocomplete="name" />
+      </div>
+      <div class="lab-field">
+        <label for="manual-phone" data-i18n="capacityColPhone">Phone</label>
+        <input id="manual-phone" name="phone_number" autocomplete="tel" />
+      </div>
+      <div class="lab-field-row">
+        <div class="lab-field">
+          <label for="manual-date" data-i18n="capacityDate">Date <span class="lab-required">*</span></label>
+          <input id="manual-date" name="date" type="date" required />
+        </div>
+        <div class="lab-field">
+          <label for="manual-time" data-i18n="capacityColTime">Time <span class="lab-required">*</span></label>
+          <select id="manual-time" name="time" required disabled>
+            <option value="" data-i18n="manualPickDateFirst">Pick a date first</option>
+          </select>
+        </div>
+      </div>
+      <div class="lab-field-row">
+        <div class="lab-field">
+          <label for="manual-party" data-i18n="capacityColParty">Covers <span class="lab-required">*</span></label>
+          <input id="manual-party" name="party_size" type="number" min="1" required />
+        </div>
+        <div class="lab-field">
+          <label for="manual-highchairs" data-i18n="capacityColHighchairs">High chairs</label>
+          <input id="manual-highchairs" name="high_chairs_requested" type="number" min="0" value="0" />
+        </div>
+      </div>
+      <div class="lab-field">
+        <label for="manual-area" data-i18n="inboundPreferredArea">Preferred area</label>
+        <select id="manual-area" name="preferred_area">
+          <option value="" data-i18n="manualAnyArea">Any area</option>
+          {% for a in areas %}
+          <option value="{{ a.area_name }}">{{ a.area_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="lab-field">
+        <label for="manual-table" data-i18n="manualTableLabel">Table <span class="lab-required">*</span></label>
+        <select id="manual-table" name="table_option" required disabled>
+          <option value="" data-i18n="manualPickSlotFirst">Set date, time and covers to see free tables</option>
+        </select>
+        <p class="lab-muted" style="font-size:0.75rem;margin-top:0.35rem" data-i18n="manualTableHint">
+          Shows single tables and merge combinations that fit the party size.
+        </p>
+      </div>
+      <div class="lab-field">
+        <label for="manual-notes" data-i18n="inboundSpecialRequests">Special requests</label>
+        <textarea id="manual-notes" name="special_requests" rows="2"></textarea>
+      </div>
+      <p id="lab-manual-success" class="lab-muted" style="color:#166534;display:none"></p>
+      <p id="lab-manual-error" class="lab-muted" style="color:var(--lab-terracotta);display:none"></p>
+      <div class="lab-actions">
+        <button type="submit" class="lab-btn lab-btn-primary" data-i18n="manualSubmit">Save reservation</button>
+        <a id="manual-view-capacity" class="lab-btn lab-btn-secondary" href="#" data-i18n="manualViewCapacity">View capacity</a>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

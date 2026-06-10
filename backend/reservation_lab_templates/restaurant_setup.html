@@ -4,6 +4,7 @@
 <script>
   window.__INITIAL_BUNDLE__ = {{ bundle_json | tojson }};
   window.__LOAD_ERROR__ = {{ (load_error or "") | tojson }};
+  window.__IS_NEW_PROFILE__ = {{ (is_new_profile | default(false)) | tojson }};
 </script>
 {% endblock %}
 {% block content %}
